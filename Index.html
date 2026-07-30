@@ -246,6 +246,8 @@ textarea,input,select{font-family:var(--bar)}
 .gdel:hover{color:var(--rojo)}
 .gform{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .gform .gc{flex:1;min-width:160px}
+.crak{display:inline-flex;align-items:center;gap:5px;font:600 11.5px/1 var(--bar);color:var(--muted);white-space:nowrap}
+.crak input{margin:0}
 .flinks{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 .flink{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fff;border-radius:11px;padding:11px 16px;font:600 13.5px var(--bar)}
 .flink:hover{border-color:var(--ink)}
@@ -298,6 +300,7 @@ textarea,input,select{font-family:var(--bar)}
 const PEND=<?!= pendJson ?>, COB=<?!= cobJson ?>, SPL=<?!= splJson ?>, LAN=<?!= lanJson ?>;
 const RES=<?!= resJson ?>, INFO=<?!= infoJson ?>, CAT=<?!= catJson ?>;
 const GAS=<?!= gasJson ?>;
+const CRE=<?!= credJson ?>;
 const UPDATED_AT="<?!= updatedAt ?>";
 /* === /DATA === */
 
@@ -399,6 +402,96 @@ function porCobrar(x){var f=num(x.Fee);return (f>0&&!pagado(x))?f:0;}
 function totalPorCobrar(){return CAT.reduce(function(a,x){return a+porCobrar(x);},0);}
 function gastosOf(x){return GAS.filter(function(g){return String(g.SongId)===String(x.Id);});}
 function gTotal(l){return l.reduce(function(a,g){return a+num(g.Monto);},0);}
+function creditosOf(x){return CRE.filter(function(c){return String(c.SongId)===String(x.Id);});}
+var CRED_ROLES=['Productor','Co-productor','Compositor/Topliner','Ing. de mezcla','Ing. de master','Músico','Vocalista','A&R','Otro'];
+function csvCell(v){v=String(v==null?'':v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function downloadGastos(x){
+  var gl=gastosOf(x), gt=gTotal(gl), fee=num(x.Fee);
+  var by={}; gl.forEach(function(g){var f=g.Fase||'Otros';by[f]=(by[f]||0)+num(g.Monto);});
+  var fases=['Producción','Mercadeo','Legal','Administrativo','Otros'];
+  var L=[];
+  L.push(['Reporte de gastos']); L.push(['Cancion', x.Cancion||'']); L.push(['Artista', x.Artista||artistaNombre()]); L.push(['Productor', x.Productor||artistaNombre()]); L.push(['Generado', new Date().toLocaleString('es')]); L.push([]);
+  L.push(['Monto acordado', fee||0]); L.push(['Total invertido', gt]); L.push(['Margen estimado', fee?(fee-gt):'']); L.push([]);
+  L.push(['Subtotales por fase']); fases.forEach(function(f){ if(by[f]) L.push([f, by[f]]); }); L.push([]);
+  L.push(['Fecha','Fase','Concepto','Monto USD']);
+  gl.forEach(function(g){ L.push([g.Fecha||'', g.Fase||'Otros', g.Concepto||'', num(g.Monto)]); });
+  L.push(['','','TOTAL', gt]);
+  var csv='﻿'+L.map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
+  var fname='Gastos - '+String(x.Cancion||'cancion').replace(/[\\/:*?"<>|]/g,'-')+'.csv';
+  var trows=gl.length?gl.map(function(g){return '<tr><td>'+esc(g.Fecha||'')+'</td><td>'+esc(g.Fase||'Otros')+'</td><td>'+esc(g.Concepto||'')+'</td><td class="r">'+money(g.Monto)+'</td></tr>';}).join(''):'<tr><td colspan="4" style="color:#999">Sin gastos cargados.</td></tr>';
+  var subrows=fases.filter(function(f){return by[f];}).map(function(f){return '<tr><td>'+f+'</td><td class="r">'+money(by[f])+'</td></tr>';}).join('');
+  var H='<!doctype html><html lang="es"><head><meta charset="utf-8"><title>'+esc(fname)+'</title>'
+   +'<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#141414;max-width:720px;margin:24px auto;padding:0 18px}'
+   +'h1{font-size:22px;margin:0 0 2px}.sub{color:#777;font-size:13px;margin-bottom:16px}'
+   +'.cards{display:flex;gap:12px;margin:14px 0 18px}.card{flex:1;border:1px solid #e5e5e8;border-radius:12px;padding:12px}'
+   +'.k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#888}.v{font-size:21px;font-weight:800;margin-top:4px}'
+   +'table{width:100%;border-collapse:collapse;margin:8px 0 20px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#888}'
+   +'.r{text-align:right;font-variant-numeric:tabular-nums}h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#888;margin:16px 0 6px}'
+   +'.btns{display:flex;gap:10px;margin:6px 0 20px}button{font:600 14px inherit;border:1px solid #141414;background:#141414;color:#fff;border-radius:9px;padding:10px 16px;cursor:pointer}button.ghost{background:#fff;color:#141414}'
+   +'@media print{.btns{display:none}}</style></head><body>'
+   +'<div class="sub" style="margin-bottom:2px;text-transform:uppercase;letter-spacing:.08em;font-size:11px">Reporte de gastos</div>'
+   +'<h1>'+esc(x.Cancion||'(sin título)')+'</h1>'
+   +'<div class="sub"><b>Artista:</b> '+esc(x.Artista||artistaNombre())+' &nbsp;·&nbsp; <b>Prod.:</b> '+esc(x.Productor||artistaNombre())+' &nbsp;·&nbsp; Generado '+esc(new Date().toLocaleString('es'))+'</div>'
+   +'<div class="cards"><div class="card"><div class="k">Acordado</div><div class="v">'+(fee?money(fee):'—')+'</div></div>'
+   +'<div class="card"><div class="k">Invertido</div><div class="v">'+money(gt)+'</div></div>'
+   +'<div class="card"><div class="k">Margen est.</div><div class="v">'+(fee?money(fee-gt):'—')+'</div></div></div>'
+   +'<div class="btns"><button id="dl">Descargar CSV</button><button class="ghost" onclick="window.print()">Imprimir / PDF</button></div>'
+   +(subrows?'<h2>Por fase</h2><table>'+subrows+'</table>':'')
+   +'<h2>Detalle</h2><table><tr><th>Fecha</th><th>Fase</th><th>Concepto</th><th class="r">Monto</th></tr>'+trows
+   +'<tr><td></td><td></td><td><b>TOTAL</b></td><td class="r"><b>'+money(gt)+'</b></td></tr></table>'
+   +'<script>var CSV='+JSON.stringify(csv).replace(/</g,'\\u003c')+',FN='+JSON.stringify(fname).replace(/</g,'\\u003c')+';'
+   +'document.getElementById("dl").onclick=function(){var b=new Blob([CSV],{type:"text/csv;charset=utf-8;"}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=FN;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u);},1500);};'
+   +'<\/script></body></html>';
+  var w=window.open('','_blank');
+  if(!w){toast('Permití las ventanas emergentes para ver el reporte.');return;}
+  w.document.open(); w.document.write(H); w.document.close();
+  toast('Reporte generado');
+}
+function downloadFicha(x){
+  var cl=creditosOf(x);
+  var acred=cl.filter(function(c){return c.Acreditado==='sí';});
+  var part=cl.filter(function(c){return c.Acreditado!=='sí';});
+  var L=[];
+  L.push(['Ficha técnica']); L.push(['Cancion', x.Cancion||'']); L.push(['Artista', x.Artista||artistaNombre()]); L.push(['Productor', x.Productor||artistaNombre()]); L.push(['Generado', new Date().toLocaleString('es')]); L.push([]);
+  L.push(['CRÉDITOS OFICIALES (acreditados)']); L.push(['Nombre','Rol','Observaciones']);
+  if(acred.length) acred.forEach(function(c){L.push([c.Nombre||'',c.Rol||'',c.Obs||'']);}); else L.push(['(ninguno)','','']);
+  L.push([]);
+  L.push(['PARTICIPARON (sin crédito)']); L.push(['Nombre','Rol','Observaciones']);
+  if(part.length) part.forEach(function(c){L.push([c.Nombre||'',c.Rol||'',c.Obs||'']);}); else L.push(['(ninguno)','','']);
+  var csv='﻿'+L.map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
+  var fname='Ficha técnica - '+String(x.Cancion||'cancion').replace(/[\\/:*?"<>|]/g,'-')+'.csv';
+  var blk=function(title,arr){
+    var rows=arr.length?arr.map(function(c){return '<tr><td>'+esc(c.Nombre||'')+'</td><td>'+esc(c.Rol||'—')+'</td><td>'+esc(c.Obs||'')+'</td></tr>';}).join(''):'<tr><td colspan="3" style="color:#999">(ninguno)</td></tr>';
+    return '<h2>'+title+'</h2><table><tr><th>Nombre</th><th>Rol</th><th>Observaciones</th></tr>'+rows+'</table>';
+  };
+  var H='<!doctype html><html lang="es"><head><meta charset="utf-8"><title>'+esc(fname)+'</title>'
+   +'<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#141414;max-width:720px;margin:24px auto;padding:0 18px}'
+   +'h1{font-size:22px;margin:0 0 2px}.sub{color:#777;font-size:13px;margin-bottom:14px}'
+   +'table{width:100%;border-collapse:collapse;margin:4px 0 18px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#888}'
+   +'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#888;margin:16px 0 4px}'
+   +'.btns{display:flex;gap:10px;margin:6px 0 18px}button{font:600 14px inherit;border:1px solid #141414;background:#141414;color:#fff;border-radius:9px;padding:10px 16px;cursor:pointer}button.ghost{background:#fff;color:#141414}'
+   +'@media print{.btns{display:none}}</style></head><body>'
+   +'<div class="sub" style="text-transform:uppercase;letter-spacing:.08em;font-size:11px;margin-bottom:2px">Ficha técnica</div>'
+   +'<h1>'+esc(x.Cancion||'(sin título)')+'</h1>'
+   +'<div class="sub"><b>Artista:</b> '+esc(x.Artista||artistaNombre())+' &nbsp;·&nbsp; <b>Prod.:</b> '+esc(x.Productor||artistaNombre())+' &nbsp;·&nbsp; Generado '+esc(new Date().toLocaleString('es'))+'</div>'
+   +'<div class="btns"><button id="dl">Descargar CSV</button><button class="ghost" onclick="window.print()">Imprimir / PDF</button></div>'
+   +blk('Créditos oficiales', acred)+blk('Participaron (sin crédito)', part)
+   +'<script>var CSV='+JSON.stringify(csv).replace(/</g,'\\u003c')+',FN='+JSON.stringify(fname).replace(/</g,'\\u003c')+';'
+   +'document.getElementById("dl").onclick=function(){var b=new Blob([CSV],{type:"text/csv;charset=utf-8;"}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=FN;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u);},1500);};'
+   +'<\/script></body></html>';
+  var w=window.open('','_blank');
+  if(!w){toast('Permití las ventanas emergentes para ver la ficha.');return;}
+  w.document.open(); w.document.write(H); w.document.close();
+  toast('Ficha técnica generada');
+}
+function addCreditoUI(btn,x){
+  var nom=(document.getElementById('crNom')||{}).value||'';
+  if(!nom.trim()){toast('Poné el nombre del colaborador.');return;}
+  var rol=(document.getElementById('crRol')||{}).value||'Otro';
+  var ac=(document.getElementById('crAc')||{}).checked?'sí':'no';
+  var obs=(document.getElementById('crObs')||{}).value||'';
+  run('createCredito',[x.Id,x.Cancion,nom,rol,ac,obs,WHO],function(r){ if(r&&r.row) CRE.push(r.row); renderFicha(); toast('Colaborador agregado'); },btn);
+}
 
 /* ---------- pendientes: semáforo ---------- */
 function activas(){return PEND.filter(function(r){return r.Estado!==DONE;});}
@@ -696,7 +789,24 @@ function renderFicha(){
   var links='<div class="flinks">'
     +(x.Link?'<a class="flink dark" href="'+esc(x.Link)+'" target="_blank" rel="noopener">Escuchar</a>':'')
     +(x.Carpeta?'<a class="flink" href="'+esc(x.Carpeta)+'" target="_blank" rel="noopener">Carpeta en Drive</a>':'')
+    +'<button class="flink" type="button" id="gReport">Descargar reporte de gastos</button>'
     +'</div>';
+
+  var cl=creditosOf(x);
+  var acredN=cl.filter(function(c){return c.Acreditado==='sí';}).length;
+  var crRows=cl.length?cl.map(function(c){
+    return '<div class="grow"><span class="gcpt">'+esc(c.Nombre||'—')+'</span><span class="gfa">'+esc(c.Rol||'—')+(c.Obs?' · '+esc(c.Obs):'')+'</span>'
+      +'<label class="crak"><input type="checkbox" data-crtog="'+esc(c.Id)+'"'+(c.Acreditado==='sí'?' checked':'')+'>acred.</label>'
+      +'<button class="gdel" data-crdel="'+esc(c.Id)+'" title="Quitar">✕</button></div>';
+  }).join(''):'<div class="gempty">Sin colaboradores cargados todavía.</div>';
+  var credBox='<div class="money"><div class="mtop"><div><div class="mk">Ficha técnica · créditos</div><div class="ms">'+acredN+' acreditados · '+(cl.length-acredN)+' sin crédito</div></div></div>'
+    +'<div class="glist">'+crRows+'</div>'
+    +'<div class="gform"><input class="inp gc" id="crNom" placeholder="Nombre del colaborador">'
+    +'<select class="inp" id="crRol">'+CRED_ROLES.map(function(r){return '<option>'+esc(r)+'</option>';}).join('')+'</select>'
+    +'<label class="crak"><input type="checkbox" id="crAc">Acreditado</label>'
+    +'<input class="inp gc" id="crObs" placeholder="Observaciones (opcional)">'
+    +'<button class="act dark" id="crAdd">Agregar colaborador</button></div>'
+    +'<div class="flinks"><button class="flink" type="button" id="crReport">Descargar ficha técnica</button></div></div>';
 
   document.getElementById('app').innerHTML='<div class="ficha">'
     +'<button class="back" id="back">← Volver al tablero</button>'
@@ -708,11 +818,14 @@ function renderFicha(){
     +'<div class="fnext"><span class="fndot"></span>Lo que sigue: <b>'+esc(nextStep(x))+'</b></div>'
     +aviso+'</div>'
     +'<div class="lvls">'+lvls+'</div>'
-    +moneyBox+links
+    +moneyBox+links+credBox
     +'<div class="fnote"><div class="plbl">Nota de la canción</div><textarea class="ta" id="songNote" rows="3" placeholder="Comentarios, acuerdos, recordatorios…">'+esc(x.Notas||'')+'</textarea><div class="hint">Se guarda en Notion al salir del campo.</div></div>'
     +'</div>';
   document.getElementById('back').onclick=function(){VIEW=null;render();window.scrollTo(0,0);};
   document.getElementById('gAdd').onclick=function(){addGastoUI(this,x);};
+  var _gr=document.getElementById('gReport'); if(_gr) _gr.onclick=function(){downloadGastos(x);};
+  var _ca=document.getElementById('crAdd'); if(_ca) _ca.onclick=function(){addCreditoUI(this,x);};
+  var _cr=document.getElementById('crReport'); if(_cr) _cr.onclick=function(){downloadFicha(x);};
   document.getElementById('songNote').onchange=function(){
     var v=this.value; x.Notas=v;
     run('setCatField',[x.Id,x.Cancion,'Notas','text',v,WHO],function(){toast('Nota guardada');});
@@ -753,6 +866,16 @@ document.addEventListener('click',function(e){
   if(gd){var gid=gd.getAttribute('data-gdel');run('delGasto',[gid,WHO],function(){
     for(var i=GAS.length-1;i>=0;i--) if(String(GAS[i].Id)===String(gid)) GAS.splice(i,1);
     renderFicha();toast('Gasto eliminado');},gd);return;}
+  /* acreditar / quitar crédito */
+  var ct=e.target.closest('[data-crtog]');
+  if(ct){var cid=ct.getAttribute('data-crtog'),cv=ct.checked?'sí':'no';
+    for(var i=0;i<CRE.length;i++) if(String(CRE[i].Id)===String(cid)) CRE[i].Acreditado=cv;
+    run('toggleCredito',[cid,cv,WHO],function(){toast(cv==='sí'?'Acreditado':'Sin crédito');});return;}
+  /* borrar colaborador */
+  var cd=e.target.closest('[data-crdel]');
+  if(cd){var did=cd.getAttribute('data-crdel');run('delCredito',[did,WHO],function(){
+    for(var i=CRE.length-1;i>=0;i--) if(String(CRE[i].Id)===String(did)) CRE.splice(i,1);
+    renderFicha();toast('Colaborador quitado');},cd);return;}
 },false);
 
 document.addEventListener('change',function(e){
