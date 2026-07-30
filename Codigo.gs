@@ -11,7 +11,7 @@
 
 var NV = '2022-06-28';
 var T_PEND='Pendientes', T_COB='Cobros', T_SPL='Splits', T_LAN='Lanzamientos', T_CAT='Catálogo';
-var T_LOG='Registro', T_RES='Recursos', T_INFO='Info', T_CFG='Config', T_GAS='Gastos';
+var T_LOG='Registro', T_RES='Recursos', T_INFO='Info', T_CFG='Config', T_GAS='Gastos', T_CRE='Creditos';
 
 // Estados de la base central (pendientes)
 var S = { DONE:'✅ Hecho', PROG:'En Ejecución', BLOCK:'🚫 Trabado', TODO:'📥 Pendientes por asignar' };
@@ -24,6 +24,7 @@ var CFG_DEFAULTS = [
   ['ID base del artista', '35faac7f7cb380daa35ff61fcf9508ba'],
   ['ID base catálogo (producción)', '64cf1324bdf34533bba69066a0a21e9f'],
   ['ID base gastos', '845ee5fa8bfa4d46b186f8ec79c809e7'],
+  ['ID base créditos', 'cc1f8d9f540c41018b109a1fdc130aa7'],
   ['Carpeta Drive del catálogo (ID o link)', ''],
   ['Token de Samply (co-manager)', ''],
   ['Project ID de Samply (solo ese proyecto)', ''],
@@ -57,6 +58,7 @@ function cfg_(){
     dbArtista:g('ID base del artista','').replace(/-/g,''),
     dbCatalogo:g('ID base catálogo (producción)','').replace(/-/g,''),
     dbGastos: g('ID base gastos','').replace(/-/g,''),
+    dbCreditos: g('ID base créditos','').replace(/-/g,''),
     driveCat: g('Carpeta Drive del catálogo (ID o link)',''),
     samplyToken:  g('Token de Samply (co-manager)',''),
     samplyProject:g('Project ID de Samply (solo ese proyecto)',''),
@@ -76,6 +78,7 @@ function onOpen(){
     .addItem('Configurar / restaurar hojas','seedRecursos')
     .addItem('Probar carpeta (Drive)','probarCarpeta')
     .addItem('Crear carpetas faltantes (Drive)','crearCarpetasFaltantes')
+    .addItem('Vaciar catálogo (empezar de cero)','vaciarCatalogo')
     .addSeparator()
     .addItem('Samply · registrar webhook','registrarWebhookSamply')
     .addItem('Samply · ver proyectos','verProyectosSamply')
@@ -215,6 +218,16 @@ function syncAll(){
     writeTab_(T_GAS, ['Concepto','Cancion','SongId','Fase','Monto','Fecha','Notas','Id'], gas);
   }
 
+  // 5) Créditos / ficha técnica por tema → pestaña Creditos
+  if(C.dbCreditos){
+    var cre=[];
+    queryDB_(C.dbCreditos).forEach(function(p){
+      var pr=p.properties||{};
+      cre.push([ pTit(pr,'Nombre'), pSel(pr,'Rol'), pChk(pr,'Acreditado')?'sí':'no', pTxt(pr,'Observaciones'), pTxt(pr,'Canción'), pTxt(pr,'SongId'), p.id ]);
+    });
+    writeTab_(T_CRE, ['Nombre','Rol','Acreditado','Obs','Cancion','SongId','Id'], cre);
+  }
+
   PropertiesService.getScriptProperties().setProperty('LAST_SYNC', new Date().toISOString());
 }
 
@@ -228,6 +241,7 @@ function doGet(){
   t.lanJson =JSON.stringify(readTab_(T_LAN));
   t.catJson =JSON.stringify(readTab_(T_CAT));
   t.gasJson =JSON.stringify(readTab_(T_GAS));
+  t.credJson=JSON.stringify(readTab_(T_CRE));
   t.resJson =JSON.stringify(readTab_(T_RES));
   t.infoJson=JSON.stringify(readTab_(T_INFO));
   var Csafe={}; for(var k in C){ if(k!=='samplyToken'&&k!=='samplySecret') Csafe[k]=C[k]; }
@@ -380,6 +394,38 @@ function delGasto(id, who){
   log_('-','Gasto eliminado','',who);
   return {ok:true};
 }
+function createCredito(songId, cancion, nombre, rol, acreditado, obs, who){
+  var C=cfg_();
+  if(!C.dbCreditos) throw new Error('Falta la base de créditos en Config.');
+  if(!nombre||!nombre.trim()) throw new Error('Falta el nombre del colaborador.');
+  var ac=(acreditado===true||acreditado==='sí'||acreditado==='true');
+  var props={ 'Nombre':{'title':[{'text':{'content':nombre.trim().substring(0,1900)}}]}, 'Acreditado':{'checkbox':ac} };
+  if(rol) props['Rol']={'select':{'name':rol}};
+  if(obs) props['Observaciones']={'rich_text':[{'text':{'content':String(obs).substring(0,1900)}}]};
+  if(cancion) props['Canción']={'rich_text':[{'text':{'content':String(cancion).substring(0,1900)}}]};
+  if(songId)  props['SongId']={'rich_text':[{'text':{'content':String(songId)}}]};
+  var res=UrlFetchApp.fetch('https://api.notion.com/v1/pages',{method:'post',contentType:'application/json',headers:H_(),payload:JSON.stringify({parent:{database_id:C.dbCreditos},properties:props}),muteHttpExceptions:true});
+  var j=JSON.parse(res.getContentText()); if(j.object==='error') throw new Error(j.message||'Error al crear crédito');
+  try{ SpreadsheetApp.getActive().getSheetByName(T_CRE).appendRow([nombre.trim(), rol||'', ac?'sí':'no', obs||'', cancion||'', songId||'', j.id]); }catch(e){}
+  log_(cancion||'-', 'Crédito: '+nombre.trim()+' ('+(rol||'—')+', '+(ac?'acreditado':'sin crédito')+')','',who);
+  return {ok:true,row:{Nombre:nombre.trim(),Rol:rol||'',Acreditado:ac?'sí':'no',Obs:obs||'',Cancion:cancion||'',SongId:songId||'',Id:j.id}};
+}
+function toggleCredito(id, acreditado, who){
+  if(!id) return {ok:false};
+  var ac=(acreditado===true||acreditado==='sí'||acreditado==='true');
+  try{ UrlFetchApp.fetch('https://api.notion.com/v1/pages/'+id,{method:'patch',contentType:'application/json',headers:H_(),payload:JSON.stringify({properties:{'Acreditado':{'checkbox':ac}}}),muteHttpExceptions:true}); }catch(e){}
+  try{ setCell_(T_CRE,'Id',id,'Acreditado',ac?'sí':'no'); }catch(e){}
+  return {ok:true};
+}
+function delCredito(id, who){
+  if(!id) return {ok:false};
+  try{ UrlFetchApp.fetch('https://api.notion.com/v1/pages/'+id,{method:'patch',contentType:'application/json',headers:H_(),payload:JSON.stringify({archived:true}),muteHttpExceptions:true}); }catch(e){}
+  try{ var sh=SpreadsheetApp.getActive().getSheetByName(T_CRE);
+    if(sh){ var v=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues(); var idc=v[0].indexOf('Id');
+      for(var r=v.length-1;r>=1;r--){ if(String(v[r][idc])===String(id)){ sh.deleteRow(r+1); break; } } } }catch(e){}
+  log_('-','Crédito eliminado','',who);
+  return {ok:true};
+}
 function catSubFolder(parent, nombre){
   var id=folderId_(parent); if(!id) throw new Error('El tema no tiene carpeta.');
   var f; try{ f=DriveApp.getFolderById(id); }catch(e){ throw new Error('No puedo abrir la carpeta del tema.'); }
@@ -400,6 +446,19 @@ function probarCarpeta(){
     var sub=f.createFolder('PRUEBA — borrar '+new Date().toLocaleTimeString());
     ui.alert('✅ Todo bien.\nCarpeta padre: "'+nombre+'"\nCuenta del script: '+(quien||'(desconocida)')+'\n\nSubcarpeta de prueba creada:\n'+sub.getUrl()+'\n\nBorrá esa prueba. Ahora los temas nuevos crearán su carpeta.');
   }catch(e2){ ui.alert('Puedo ver la carpeta "'+nombre+'" pero no crear dentro. Error:\n'+(e2&&e2.message?e2.message:e2)+'\n\nLa cuenta del script ('+(quien||'?')+') necesita permiso de Editor en esa carpeta.'); }
+}
+function vaciarCatalogo(){
+  var C=cfg_(), ui=SpreadsheetApp.getUi();
+  if(!C.dbCatalogo){ ui.alert('Falta el ID de la base de catálogo en Config.'); return; }
+  var r=ui.alert('Vaciar catálogo', 'Esto ARCHIVA todas las canciones del catálogo en Notion (recuperables 30 días desde la papelera) y limpia la hoja. Vas a recargarlas a mano. ¿Seguimos?', ui.ButtonSet.YES_NO);
+  if(r!==ui.Button.YES) return;
+  var pages=queryDB_(C.dbCatalogo), n=0;
+  pages.forEach(function(p){
+    try{ UrlFetchApp.fetch('https://api.notion.com/v1/pages/'+p.id,{method:'patch',contentType:'application/json',headers:H_(),payload:JSON.stringify({archived:true}),muteHttpExceptions:true}); n++; Utilities.sleep(120); }catch(e){}
+  });
+  try{ writeTab_(T_CAT, ['Cancion','Artista','Productor','Estatus','Fase','Grabacion','Prod','Mezcla','DocMezcla','Feedback','Master','DocMaster','VersAlt','Stems','DocStems','LabelCopy','DocLabelCopy','Contratos','DocContratos','Split','DocSplit','Release','DocRelease','Pagado','DocPagado','Registrado','DocRegistrado','CoverArt','DocCover','Canva','DocCanva','Videos','DocVideos','Fotos','DocFotos','Redes','DocRedes','Fee','Saldo','Notas','Link','Carpeta','Id'], []); }catch(e){}
+  log_('-', 'Catálogo vaciado ('+n+' canciones archivadas)','','sistema');
+  ui.alert('Listo. Canciones archivadas: '+n+'.\n\nLa hoja del catálogo quedó vacía. Recargá la app y empezá a cargar los temas a mano con el co-manager.');
 }
 function crearCarpetasFaltantes(){
   var C=cfg_();
